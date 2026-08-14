@@ -5,15 +5,14 @@ import numpy as np
 def expectancy(trades):
     wins = trades[trades > 0]
     losses = trades[trades < 0]
-
-    winrate = len(wins) / len(trades)
-
-    avg_win = wins.mean()
-    avg_loss = abs(losses.mean())
-
-    expectancy = winrate * avg_win - (1-winrate) * avg_loss
-
-    return expectancy
+    
+    win_rate = len(wins) / len(trades) if len(trades) > 0 else 0
+    loss_rate = len(losses) / len(trades) if len(trades) > 0 else 0
+    
+    avg_win = wins.mean() if len(wins) > 0 else 0.0
+    avg_loss = np.abs(losses.mean()) if len(losses) > 0 else 0.0
+    
+    return (win_rate * avg_win) - (loss_rate * avg_loss)
 
 #%%
 def median(trades):
@@ -54,8 +53,11 @@ def winrate(trades):
 def profit_factor(trades):
     wins = trades[trades > 0]
     losses = trades[trades < 0]
-
-    return sum(wins) / abs(sum(losses))
+    
+    if len(losses) == 0:
+        return np.inf if len(wins) > 0 else 0.0
+    
+    return np.sum(wins) / np.abs(np.sum(losses))
     
 
 #%%
