@@ -11,7 +11,7 @@ import telebot
 
 matplotlib.use('agg')
 
-from src.data_loader import load_trades
+from src.data_loader import load_trades, get_trades_path
 from src.metrics import (
     expectancy,
     max_drawdown,
@@ -31,10 +31,8 @@ ENV_PATH = BASE_DIR / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
 
 bot = telebot.TeleBot(BOT_TOKEN)
-TRADES_FILE = "data/trades.csv"
 
 
 def fmt(val, spec=".2f"):
@@ -45,8 +43,8 @@ def fmt(val, spec=".2f"):
     return f"{val:{spec}}"
 
 
-def run_simulation_and_get_report():
-    trades = load_trades()
+def run_simulation_and_get_report(chat_id):
+    trades = load_trades(chat_id)
     if len(trades) == 0:
         raise ValueError("No trades found in dataset.")
 
@@ -104,7 +102,7 @@ def handle_run_command(message):
     bot.send_message(chat_id, "Running Monte Carlo simulation...")
 
     try:
-        report, results, final_results = run_simulation_and_get_report()
+        report, results, final_results = run_simulation_and_get_report(chat_id)
 
         # 1. Send text report
         formatted_message = f"```\n{report}\n```"
@@ -151,11 +149,14 @@ def process_trade_step(message):
         return
 
     try:
-        os.makedirs(os.path.dirname(TRADES_FILE), exist_ok=True)
-        
-        file_exists = os.path.exists(TRADES_FILE) and os.path.getsize(TRADES_FILE) > 0
-        with open(TRADES_FILE, "a", encoding="utf-8") as f:
-            if file_exists:
+        trades_file = get_trades_path(chat_id)
+        os.makedirs(trades_file.parent, exist_ok=True)
+
+        file_exists = trades_file.exists() and trades_file.stat().st_size > 0
+        with open(trades_file, "a", encoding="utf-8") as f:
+            if not file_exists:
+                f.write("R\n")
+            else:
                 f.write("\n")
             f.write(f"{trade_r}")
 
@@ -169,7 +170,7 @@ def process_trade_step(message):
 
 
 @bot.message_handler(commands=['add_list'])
-def handle_add_list(message):  # Fixed handler function name
+def handle_add_list(message):
     chat_id = message.chat.id
     msg = bot.send_message(
         chat_id,    
@@ -226,11 +227,14 @@ def process_list_step(message):
         return
 
     try:
-        os.makedirs(os.path.dirname(TRADES_FILE), exist_ok=True)
-        
-        file_exists = os.path.exists(TRADES_FILE) and os.path.getsize(TRADES_FILE) > 0
-        with open(TRADES_FILE, "a", encoding="utf-8") as f:
-            if file_exists:
+        trades_file = get_trades_path(chat_id)
+        os.makedirs(trades_file.parent, exist_ok=True)
+
+        file_exists = trades_file.exists() and trades_file.stat().st_size > 0
+        with open(trades_file, "a", encoding="utf-8") as f:
+            if not file_exists:
+                f.write("R\n")
+            else:
                 f.write("\n")
             f.write("\n".join(str(r) for r in trades_r))
 
@@ -245,6 +249,8 @@ def process_list_step(message):
             chat_id,
             f"Error saving trades: {str(e)}"
         )
+
+
 @bot.message_handler(commands=['clear'])
 def handle_clear_command(message):
     chat_id = message.chat.id
@@ -265,14 +271,14 @@ def process_clear_confirmation(message):
         return
 
     try:
-        # Overwrite file keeping only the header 'R'
-        os.makedirs(os.path.dirname(TRADES_FILE), exist_ok=True)
-        with open(TRADES_FILE, "w") as f:
+        trades_file = get_trades_path(chat_id)
+        os.makedirs(trades_file.parent, exist_ok=True)
+        with open(trades_file, "w") as f:
             f.write("R\n")
 
         bot.send_message(
             chat_id, 
-            "Successfully cleared all trades. `trades.csv` reset to initial state.",
+            "Successfully cleared all trades. Your trade log was reset to initial state.",
             parse_mode="Markdown"
         )
     except Exception as e:

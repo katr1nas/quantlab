@@ -3,4 +3,6 @@
 __pycache__/
 *.pyc
 data/trades.csv
+data/trades_*.csv
+!data/trades_example.csv
 bot.log
