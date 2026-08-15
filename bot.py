@@ -93,6 +93,7 @@ def fig_to_bytes():
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
+    print(f"[DEBUG] /start from chat_id={message.chat.id}")
     bot.reply_to(message, "Bot ready. Send /run or /mc to execute the Monte Carlo simulation.")
 
 
@@ -286,5 +287,13 @@ def process_clear_confirmation(message):
 
 
 if __name__ == "__main__":
+    bot.set_my_commands([
+        telebot.types.BotCommand("start", "Запустить бота"),
+        telebot.types.BotCommand("run", "Запустить Monte Carlo симуляцию"),
+        telebot.types.BotCommand("add_trade", "Добавить одну сделку"),
+        telebot.types.BotCommand("add_list", "Добавить список сделок"),
+        telebot.types.BotCommand("clear", "Очистить все сделки"),
+        telebot.types.BotCommand("help", "Помощь"),
+    ])
     print("Bot is listening for commands...")
     bot.infinity_polling()
