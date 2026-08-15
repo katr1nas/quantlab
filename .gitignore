@@ -1,4 +1,6 @@
 .env
 .venv/
 __pycache__/
-*.log
+*.pyc
+data/trades.csv
+bot.log
