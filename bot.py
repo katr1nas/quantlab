@@ -12,7 +12,7 @@ import telebot
 
 matplotlib.use('agg')
 
-from src.data_loader import load_trades, get_trades_path, append_trade, clear_trades
+from src.data_loader import load_trades, get_trades_path, append_trade, clear_trades, load_trade_records
 from src.metrics import (
     expectancy,
     max_drawdown,
@@ -295,7 +295,31 @@ def process_clear_confirmation(message):
         bot.send_message(chat_id, f"Error clearing trades: {str(e)}")
 
 
-@bot.message_handler(commands=['stats'])
+@bot.message_handler(commands=['trades'])
+def handle_trades(message):
+    track_usage(message)
+    chat_id = message.chat.id
+
+    try:
+        records = load_trade_records(chat_id)
+    except ValueError as e:
+        bot.send_message(chat_id, str(e))
+        return
+
+    lines = [f"Total trades: {len(records)}\n"]
+    for i, rec in enumerate(records, start=1):
+        r = rec.get("r")
+        asset = rec.get("asset") or "-"
+        direction = rec.get("direction") or "-"
+        lines.append(f"{i}. {r:+.2f}R  {asset}  {direction}")
+
+    text = "\n".join(lines)
+
+    if len(text) > 4000:
+        for i in range(0, len(text), 4000):
+            bot.send_message(chat_id, text[i:i+4000])
+    else:
+        bot.send_message(chat_id, text)
 def handle_stats(message):
     chat_id = message.chat.id
 
@@ -323,6 +347,7 @@ if __name__ == "__main__":
         telebot.types.BotCommand("add_trade", "Добавить одну сделку"),
         telebot.types.BotCommand("add_list", "Добавить список сделок"),
         telebot.types.BotCommand("clear", "Очистить все сделки"),
+        telebot.types.BotCommand("trades", "Показать список сделок"),
         telebot.types.BotCommand("help", "Помощь"),
     ])
     print("Bot is listening for commands...")
