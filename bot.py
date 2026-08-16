@@ -1,4 +1,5 @@
 import io
+import json
 import math
 import os
 from pathlib import Path
@@ -11,7 +12,7 @@ import telebot
 
 matplotlib.use('agg')
 
-from src.data_loader import load_trades, get_trades_path
+from src.data_loader import load_trades, get_trades_path, append_trade, clear_trades
 from src.metrics import (
     expectancy,
     max_drawdown,
@@ -27,12 +28,38 @@ from src.plots import equity_curves, results_distribution
 # --- CONFIGURATION ---
 BASE_DIR = Path(__file__).resolve().parent
 ENV_PATH = BASE_DIR / ".env"
+STATS_PATH = BASE_DIR / "data" / "stats.json"
 
 load_dotenv(dotenv_path=ENV_PATH)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")  # твой личный chat_id, для /stats
 
 bot = telebot.TeleBot(BOT_TOKEN)
+
+
+def load_stats():
+    if not STATS_PATH.exists():
+        return {"users": {}, "total_messages": 0}
+    try:
+        return json.loads(STATS_PATH.read_text())
+    except Exception:
+        return {"users": {}, "total_messages": 0}
+
+
+def track_usage(message):
+    stats = load_stats()
+    chat_id = str(message.chat.id)
+    username = message.from_user.username or message.from_user.first_name or "unknown"
+
+    if chat_id not in stats["users"]:
+        stats["users"][chat_id] = {"username": username, "messages": 0}
+
+    stats["users"][chat_id]["messages"] += 1
+    stats["total_messages"] += 1
+
+    STATS_PATH.parent.mkdir(exist_ok=True)
+    STATS_PATH.write_text(json.dumps(stats, ensure_ascii=False, indent=2))
 
 
 def fmt(val, spec=".2f"):
@@ -93,12 +120,13 @@ def fig_to_bytes():
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
-    print(f"[DEBUG] /start from chat_id={message.chat.id}")
+    track_usage(message)
     bot.reply_to(message, "Bot ready. Send /run or /mc to execute the Monte Carlo simulation.")
 
 
 @bot.message_handler(commands=['run', 'mc'])
 def handle_run_command(message):
+    track_usage(message)
     chat_id = message.chat.id
     bot.send_message(chat_id, "Running Monte Carlo simulation...")
 
@@ -127,13 +155,26 @@ def handle_run_command(message):
 
 @bot.message_handler(commands=['add_trade'])
 def handle_add_trade(message):
+    track_usage(message)
     chat_id = message.chat.id
     msg = bot.send_message(
-        chat_id,    
-        'Please enter trade result in R: (e.g., `1.5` or `-1.0`)',
-        parse_mode="Markdown" 
+        chat_id,
+        "Send: `R ASSET DIRECTION`\nExample: `1.5 EURUSD long` or `-1 XAUUSD short`",
+        parse_mode="Markdown"
     )
     bot.register_next_step_handler(msg, process_trade_step)
+
+
+def parse_trade_line(line):
+    parts = line.strip().split()
+    if not parts:
+        raise ValueError("empty line")
+    r = float(parts[0])
+    asset = parts[1].upper() if len(parts) > 1 else None
+    direction = parts[2].lower() if len(parts) > 2 else None
+    if direction and direction not in ("long", "short"):
+        raise ValueError(f"direction must be 'long' or 'short', got '{direction}'")
+    return r, asset, direction
 
 
 def process_trade_step(message):
@@ -141,29 +182,20 @@ def process_trade_step(message):
     user_input = message.text.strip()
 
     try:
-        trade_r = float(user_input)
-    except ValueError:
+        r, asset, direction = parse_trade_line(user_input)
+    except ValueError as e:
         bot.send_message(
-            chat_id, 
-            "Invalid format. Please enter a numeric value (e.g., 1.5 or -1.0)."
+            chat_id,
+            f"Invalid format: {str(e)}\nUse: `R ASSET DIRECTION`, e.g. `1.5 EURUSD long`",
+            parse_mode="Markdown"
         )
         return
 
     try:
-        trades_file = get_trades_path(chat_id)
-        os.makedirs(trades_file.parent, exist_ok=True)
-
-        file_exists = trades_file.exists() and trades_file.stat().st_size > 0
-        with open(trades_file, "a", encoding="utf-8") as f:
-            if not file_exists:
-                f.write("R\n")
-            else:
-                f.write("\n")
-            f.write(f"{trade_r}")
-
+        append_trade(chat_id, r, asset, direction)
         bot.send_message(
-            chat_id, 
-            f"Successfully added trade: `{trade_r:+.2f}R`\nRun /run to recalculate metrics.",
+            chat_id,
+            f"Added: `{r:+.2f}R` {asset or ''} {direction or ''}\nRun /run to recalculate metrics.",
             parse_mode="Markdown"
         )
     except Exception as e:
@@ -172,17 +204,16 @@ def process_trade_step(message):
 
 @bot.message_handler(commands=['add_list'])
 def handle_add_list(message):
+    track_usage(message)
     chat_id = message.chat.id
     msg = bot.send_message(
-        chat_id,    
-        "Send trades in R, one per line.\n\n"
+        chat_id,
+        "Send trades, one per line: `R ASSET DIRECTION`\n\n"
         "Example:\n"
-        "1.5\n"
-        "-1\n"
-        "0.5\n"
-        "2\n"
-        "-0.8",
-        parse_mode="Markdown" 
+        "1.5 EURUSD long\n"
+        "-1 XAUUSD short\n"
+        "0.5 GBPUSD long",
+        parse_mode="Markdown"
     )
     bot.register_next_step_handler(msg, process_list_step)
 
@@ -192,68 +223,50 @@ def process_list_step(message):
     user_input = message.text.strip()
 
     if not user_input:
-        bot.send_message(
-            chat_id, 
-            "The list is empty. Please run /add_list again:)"
-        )
+        bot.send_message(chat_id, "The list is empty. Please run /add_list again:)")
         return
-    
+
     lines = user_input.splitlines()
-    trades_r = []
+    parsed = []
 
     for line_number, line in enumerate(lines, start=1):
         line = line.strip()
-
         if not line:
             continue
-        
+
         try:
-            trade_r = float(line)
-        except ValueError:
+            r, asset, direction = parse_trade_line(line)
+        except ValueError as e:
             bot.send_message(
                 chat_id,
-                f"Invalid value on line {line_number}: `{line}`\n\n"
+                f"Invalid value on line {line_number}: `{line}` ({e})\n\n"
                 "Nothing was added. Please run /add_list again.",
                 parse_mode="Markdown"
             )
             return
-        
-        trades_r.append(trade_r)
-    
-    if not trades_r:
-        bot.send_message(
-            chat_id,
-            "No valid trades found."
-        )
+
+        parsed.append((r, asset, direction))
+
+    if not parsed:
+        bot.send_message(chat_id, "No valid trades found.")
         return
 
     try:
-        trades_file = get_trades_path(chat_id)
-        os.makedirs(trades_file.parent, exist_ok=True)
-
-        file_exists = trades_file.exists() and trades_file.stat().st_size > 0
-        with open(trades_file, "a", encoding="utf-8") as f:
-            if not file_exists:
-                f.write("R\n")
-            else:
-                f.write("\n")
-            f.write("\n".join(str(r) for r in trades_r))
+        for r, asset, direction in parsed:
+            append_trade(chat_id, r, asset, direction)
 
         bot.send_message(
             chat_id,
-            f"Successfully added `{len(trades_r)}` trades.\n"
-            "Run /run to recalculate metrics.",
+            f"Successfully added `{len(parsed)}` trades.\nRun /run to recalculate metrics.",
             parse_mode="Markdown"
         )
     except Exception as e:
-        bot.send_message(
-            chat_id,
-            f"Error saving trades: {str(e)}"
-        )
+        bot.send_message(chat_id, f"Error saving trades: {str(e)}")
 
 
 @bot.message_handler(commands=['clear'])
 def handle_clear_command(message):
+    track_usage(message)
     chat_id = message.chat.id
     msg = bot.send_message(
         chat_id,
@@ -272,18 +285,35 @@ def process_clear_confirmation(message):
         return
 
     try:
-        trades_file = get_trades_path(chat_id)
-        os.makedirs(trades_file.parent, exist_ok=True)
-        with open(trades_file, "w") as f:
-            f.write("R\n")
-
+        clear_trades(chat_id)
         bot.send_message(
-            chat_id, 
+            chat_id,
             "Successfully cleared all trades. Your trade log was reset to initial state.",
             parse_mode="Markdown"
         )
     except Exception as e:
         bot.send_message(chat_id, f"Error clearing trades: {str(e)}")
+
+
+@bot.message_handler(commands=['stats'])
+def handle_stats(message):
+    chat_id = message.chat.id
+
+    if ADMIN_CHAT_ID and str(chat_id) != str(ADMIN_CHAT_ID):
+        return  # тихо игнорируем чужих
+
+    stats = load_stats()
+    users = stats["users"]
+
+    if not users:
+        bot.send_message(chat_id, "Пока никто не пользовался ботом.")
+        return
+
+    lines = [f"Всего пользователей: {len(users)}", f"Всего сообщений: {stats['total_messages']}", ""]
+    for uid, data in sorted(users.items(), key=lambda x: -x[1]["messages"]):
+        lines.append(f"@{data['username']} — {data['messages']} сообщений")
+
+    bot.send_message(chat_id, "\n".join(lines))
 
 
 if __name__ == "__main__":
