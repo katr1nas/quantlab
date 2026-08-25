@@ -12,14 +12,14 @@ import telebot
 
 matplotlib.use('agg')
 
-from src.data_loader import load_trades, get_trades_path, append_trade, clear_trades, load_trade_records
+from src.data_loader import load_trades, get_trades_path, append_trade, clear_trades, load_trade_records, filter_trades
 from src.metrics import (
     expectancy,
     max_drawdown,
     mean,
     median,
     profit_factor,
-    sharpe,
+    trade_sharpe,
     winrate,
 )
 from src.monte_carlo import monte_carlo
@@ -100,7 +100,7 @@ def run_simulation_and_get_report(chat_id):
         f"Mean: {fmt(mean(trades))}\n"
         f"Median: {fmt(median(trades))}\n"
         f"Profit Factor: {fmt(profit_factor(trades))}\n"
-        f"Sharpe: {fmt(sharpe(trades))}\n"
+        f"Sharpe: {fmt(trade_sharpe(trades))}\n"
         f"Winrate: {winrate(trades):.2%}"
     )
 
@@ -338,6 +338,51 @@ def handle_stats(message):
         lines.append(f"@{data['username']} — {data['messages']} сообщений")
 
     bot.send_message(chat_id, "\n".join(lines))
+
+@bot.message_handler(commands=['filter'])
+def handle_filter(message):
+    track_usage(message)
+    chat_id = message.chat.id
+    msg = bot.send_message(
+        chat_id,
+        "Send: `DIRECTION, EXCLUDED_ASSET1, EXCLUDED_ASSET2, ...`\n"
+        "DIRECTION: `long`, `short`, or leave empty for both.\n"
+        "Example: `long, XAUUSD, EURUSD`",
+        parse_mode="Markdown"
+    )
+    bot.register_next_step_handler(msg, process_filter_step)
+
+
+def process_filter_step(message):
+    chat_id = message.chat.id
+    parts = [p.strip() for p in message.text.split(",")]
+
+    direction = parts[0].lower() if parts[0] else None
+    if direction not in (None, "", "long", "short"):
+        bot.send_message(chat_id, f"Invalid direction: `{direction}`", parse_mode="Markdown")
+        return
+    direction = direction or None
+
+    excluded_assets = [a.upper() for a in parts[1:] if a]
+
+    try:
+        trades = filter_trades(chat_id, direction=direction, excluded_assets=excluded_assets)
+    except ValueError as e:
+        bot.send_message(chat_id, str(e))
+        return
+
+    report = (
+        f"Direction: {direction or 'both'}\n"
+        f"Excluded: {', '.join(excluded_assets) or 'none'}\n"
+        f"Trades: {len(trades)}\n"
+        f"Expectancy: {fmt(expectancy(trades), '.4f')}\n"
+        f"Profit Factor: {fmt(profit_factor(trades))}\n"
+        f"Sharpe: {fmt(sharpe(trades))}\n"
+        f"Winrate: {winrate(trades):.2%}"
+    )
+    bot.send_message(chat_id, f"```\n{report}\n```", parse_mode="Markdown")
+    
+
 
 
 if __name__ == "__main__":
