@@ -25,6 +25,8 @@ from src.metrics import (
 )
 from src.monte_carlo import monte_carlo
 from src.plots import equity_curves, results_distribution
+from src.data_loader import load_trades, get_trades_path, append_trade, clear_trades, load_trade_records, filter_trades, DATA_DIR
+from src.mt5_parser import parse_mt5_html
 
 # --- CONFIGURATION ---
 BASE_DIR = Path(__file__).resolve().parent
@@ -405,6 +407,68 @@ def process_filter_step(message):
     except Exception as e:
         bot.send_message(chat_id, f"Error running filtered simulation: {e}")
 
+@bot.message_handler(commands=['import_mt5'])
+def handle_import_mt5(message):
+    track_usage(message)
+    chat_id = message.chat.id
+    msg = bot.send_message(
+        chat_id,
+        "Send account balance and risk % per trade, e.g. `50000 1` (=1% risk).\n"
+        "Then I'll ask you to upload the MT5 History HTML report.",
+        parse_mode="Markdown"
+    )
+    bot.register_next_step_handler(msg, process_mt5_balance_step)
+
+
+def process_mt5_balance_step(message):
+    chat_id = message.chat.id
+    try:
+        balance_str, risk_str = message.text.strip().split()
+        balance = float(balance_str)
+        risk_pct = float(risk_str) / 100.0
+        if balance <= 0 or not (0 < risk_pct < 1):
+            raise ValueError
+    except ValueError:
+        bot.send_message(chat_id, "Invalid format. Use: `50000 1`", parse_mode="Markdown")
+        return
+
+    msg = bot.send_message(chat_id, "Now upload the MT5 History report (.html file).")
+    bot.register_next_step_handler(msg, process_mt5_file_step, balance, risk_pct)
+
+
+def process_mt5_file_step(message, balance, risk_pct):
+    chat_id = message.chat.id
+
+    if not message.document:
+        bot.send_message(chat_id, "That's not a file. Please upload the .html report, or run /import_mt5 again.")
+        return
+
+    file_info = bot.get_file(message.document.file_id)
+    downloaded = bot.download_file(file_info.file_path)
+
+    tmp_path = DATA_DIR / f"mt5_import_{chat_id}.html"
+    DATA_DIR.mkdir(exist_ok=True)
+    with open(tmp_path, "wb") as f:
+        f.write(downloaded)
+
+    try:
+        trades = parse_mt5_html(str(tmp_path), balance, risk_pct)
+    except Exception as e:
+        bot.send_message(chat_id, f"Failed to parse report: {e}")
+        return
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    for t in trades:
+        append_trade(chat_id, t["r"], t["asset"], t["direction"])
+
+    bot.send_message(
+        chat_id,
+        f"Imported {len(trades)} trades from MT5 (balance={balance:.0f}, risk={risk_pct*100:.2f}%).\n"
+        "Run /run to recalculate metrics.",
+        parse_mode="Markdown"
+    )
+
 
 
 if __name__ == "__main__":
@@ -416,6 +480,8 @@ if __name__ == "__main__":
         telebot.types.BotCommand("clear", "Очистить все сделки"),
         telebot.types.BotCommand("trades", "Показать список сделок"),
         telebot.types.BotCommand("help", "Помощь"),
+        telebot.types.BotCommand("filter", "Фильтр по направлению/активу"),
+        telebot.types.BotCommand("import_mt5", "Импорт истории из MT5"),
     ])
     print("Bot is listening for commands...")
     bot.infinity_polling()
