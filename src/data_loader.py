@@ -72,12 +72,4 @@ def filter_trades(chat_id, direction=None, excluded_assets=None):
         raise ValueError("No trades match the given filters.")
 
     return np.array([r["r"] for r in records], dtype=float)
-
-trades = [
-    {"r": 1.5, "asset": "EURUSD", "direction": "long"},
-    {"r": -1.0, "asset": "XAUUSD", "direction": "short"},
-    {"r": 0.5, "asset": "EURUSD", "direction": "long"},
-]
-
-print(filter_trades(trades, direction="long"))
     

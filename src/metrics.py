@@ -16,6 +16,7 @@ def expectancy(trades):
 
 #%%
 def median(trades):
+    trades = np.sort(trades)
     m = len(trades)
     if m % 2 == 0: # if m is even then median is average between 2 items in center
         median = (trades[m // 2 - 1] + trades[m // 2]) / 2
@@ -29,7 +30,7 @@ def mean(trades):
     return np.mean(trades)
 
 #%%
-def sharpe(trades):
+def trade_sharpe(trades):
     mean_trades = mean(trades)
     std_trades = np.std(trades, ddof=1)
     if std_trades == 0:
