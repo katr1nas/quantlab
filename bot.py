@@ -19,7 +19,7 @@ from src.metrics import (
     mean,
     median,
     profit_factor,
-    trade_sharpe,
+    trade_sharpe as sharpe,
     winrate,
 )
 from src.monte_carlo import monte_carlo
