@@ -362,26 +362,47 @@ def process_filter_step(message):
         bot.send_message(chat_id, f"Invalid direction: `{direction}`", parse_mode="Markdown")
         return
     direction = direction or None
-
     excluded_assets = [a.upper() for a in parts[1:] if a]
 
     try:
         trades = filter_trades(chat_id, direction=direction, excluded_assets=excluded_assets)
+
+        n_simulations = 1000
+        n_trades_per_sim = len(trades)
+        results = monte_carlo(trades, n_simulations, n_trades_per_sim)
+        final_results = results[:, -1]
+        drawdowns = np.array([max_drawdown(results[i]) for i in range(n_simulations)])
+
+        report = (
+            f"Direction: {direction or 'both'}\n"
+            f"Excluded: {', '.join(excluded_assets) or 'none'}\n"
+            f"Trades: {len(trades)}\n\n"
+            "MONTE CARLO SIMULATION\n"
+            "---------------------\n"
+            f"Mean: {fmt(mean(final_results))}\n"
+            f"Median: {fmt(median(final_results))}\n"
+            f"Worst DD: {fmt(drawdowns.min())}\n\n"
+            "STRATEGY METRICS\n"
+            "----------------\n"
+            f"Expectancy: {fmt(expectancy(trades), '.4f')}\n"
+            f"Profit Factor: {fmt(profit_factor(trades))}\n"
+            f"Sharpe: {fmt(sharpe(trades))}\n"
+            f"Winrate: {winrate(trades):.2%}"
+        )
+        bot.send_message(chat_id, f"```\n{report}\n```", parse_mode="Markdown")
+
+        plt.close('all')
+        equity_curves(results)
+        bot.send_photo(chat_id, fig_to_bytes(), caption="Equity Curves (filtered)")
+        plt.close('all')
+        results_distribution(final_results)
+        bot.send_photo(chat_id, fig_to_bytes(), caption="Distribution (filtered)")
+        plt.close('all')
+
     except ValueError as e:
         bot.send_message(chat_id, str(e))
-        return
-
-    report = (
-        f"Direction: {direction or 'both'}\n"
-        f"Excluded: {', '.join(excluded_assets) or 'none'}\n"
-        f"Trades: {len(trades)}\n"
-        f"Expectancy: {fmt(expectancy(trades), '.4f')}\n"
-        f"Profit Factor: {fmt(profit_factor(trades))}\n"
-        f"Sharpe: {fmt(sharpe(trades))}\n"
-        f"Winrate: {winrate(trades):.2%}"
-    )
-    bot.send_message(chat_id, f"```\n{report}\n```", parse_mode="Markdown")
-    
+    except Exception as e:
+        bot.send_message(chat_id, f"Error running filtered simulation: {e}")
 
 
 
