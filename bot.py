@@ -14,6 +14,7 @@ matplotlib.use('agg')
 
 from src.data_loader import (
     load_trades,
+    get_trades_path,
     append_trade,
     clear_trades,
     load_trade_records,
@@ -32,7 +33,13 @@ from src.metrics import (
 from src.monte_carlo import monte_carlo
 from src.plots import equity_curves, results_distribution
 from src.mt5_parser import parse_mt5_html
-from src.ml.win_predictor import train_win_model, save_model, load_model, predict_win_probability
+from src.ml.win_predictor import (
+    train_win_model,
+    save_model,
+    load_model,
+    predict_win_probability,
+    predict_batch,
+)
 
 # --- CONFIGURATION ---
 BASE_DIR = Path(__file__).resolve().parent
@@ -564,6 +571,48 @@ def datetime_now_weekday():
     return datetime.utcnow().weekday()
 
 
+@bot.message_handler(commands=['predict_all'])
+def handle_predict_all(message):
+    track_usage(message)
+    chat_id = message.chat.id
+
+    try:
+        records = load_trade_records(chat_id)
+        bundle = load_model(chat_id, DATA_DIR)
+        results = predict_batch(bundle, records)
+
+        lines = [f"Predictions for all {len(results)} stored trades:", ""]
+        correct = 0
+        for i, res in enumerate(results, start=1):
+            r = res["record"]
+            asset = r.get("asset") or "-"
+            direction = r.get("direction") or "-"
+            actual = "WIN" if res["actual_win"] else "LOSS"
+            predicted_label = "WIN" if res["predicted_prob"] >= 0.5 else "LOSS"
+            if predicted_label == actual:
+                correct += 1
+            lines.append(
+                f"{i}. {asset} {direction} — pred {res['predicted_prob']:.0%} ({predicted_label}) / actual {actual}"
+            )
+
+        accuracy = correct / len(results) if results else 0
+        lines.append("")
+        lines.append(f"Directional accuracy on this sample: {accuracy:.1%}")
+        lines.append("(Trained and evaluated on the same data — this is fit quality, not out-of-sample skill.)")
+
+        text = "\n".join(lines)
+        if len(text) > 4000:
+            for i in range(0, len(text), 4000):
+                bot.send_message(chat_id, text[i:i + 4000])
+        else:
+            bot.send_message(chat_id, text)
+
+    except ValueError as e:
+        bot.send_message(chat_id, str(e))
+    except Exception as e:
+        bot.send_message(chat_id, f"Error running batch prediction: {e}")
+
+
 if __name__ == "__main__":
     bot.set_my_commands([
         telebot.types.BotCommand("start", "Start the bot"),
@@ -577,6 +626,7 @@ if __name__ == "__main__":
         telebot.types.BotCommand("import_mt5", "Import MT5 history"),
         telebot.types.BotCommand("train_model", "Train win-probability model"),
         telebot.types.BotCommand("predict", "Predict win probability for a trade"),
+        telebot.types.BotCommand("predict_all", "Predict win probability for all stored trades"),
     ])
     print("Bot is listening for commands...")
     bot.infinity_polling()

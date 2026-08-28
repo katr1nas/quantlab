@@ -64,3 +64,25 @@ def predict_win_probability(bundle, asset, direction, session, hour, day_of_week
     )
     proba = bundle["model"].predict_proba(X)
     return float(proba[0, 1])
+
+
+def predict_batch(bundle, records):
+    """Run the model against a full list of trade records at once.
+
+    Returns list of dicts: {record, predicted_prob, actual_win}.
+    """
+    X, y, _, _, _ = build_feature_matrix(
+        records,
+        asset_vocab=bundle["asset_vocab"],
+        session_vocab=bundle["session_vocab"],
+    )
+    probs = bundle["model"].predict_proba(X)[:, 1]
+
+    results = []
+    for record, prob, actual in zip(records, probs, y):
+        results.append({
+            "record": record,
+            "predicted_prob": float(prob),
+            "actual_win": bool(actual),
+        })
+    return results
