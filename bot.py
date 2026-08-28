@@ -14,7 +14,6 @@ matplotlib.use('agg')
 
 from src.data_loader import (
     load_trades,
-    get_trades_path,
     append_trade,
     clear_trades,
     load_trade_records,
@@ -33,6 +32,7 @@ from src.metrics import (
 from src.monte_carlo import monte_carlo
 from src.plots import equity_curves, results_distribution
 from src.mt5_parser import parse_mt5_html
+from src.ml.win_predictor import train_win_model, save_model, load_model, predict_win_probability
 
 # --- CONFIGURATION ---
 BASE_DIR = Path(__file__).resolve().parent
@@ -492,6 +492,78 @@ def process_mt5_file_step(message, balance, risk_pct):
     )
 
 
+@bot.message_handler(commands=['train_model'])
+def handle_train_model(message):
+    track_usage(message)
+    chat_id = message.chat.id
+
+    try:
+        records = load_trade_records(chat_id)
+        bundle = train_win_model(records)
+        save_model(bundle, chat_id, DATA_DIR)
+
+        lines = [f"Model trained on {bundle['n_trades_trained_on']} trades.", "", "Feature importance:"]
+        for name, imp in list(bundle["model"].feature_importance().items())[:8]:
+            lines.append(f"  {name}: {imp:.2%}")
+        lines.append("")
+        lines.append("Run /predict to get a win probability for a hypothetical trade.")
+        bot.send_message(chat_id, "\n".join(lines))
+    except ValueError as e:
+        bot.send_message(chat_id, str(e))
+    except Exception as e:
+        bot.send_message(chat_id, f"Error training model: {e}")
+
+
+@bot.message_handler(commands=['predict'])
+def handle_predict(message):
+    track_usage(message)
+    chat_id = message.chat.id
+    msg = bot.send_message(
+        chat_id,
+        "Send: `ASSET DIRECTION SESSION HH:MM`\n"
+        "Example: `EURUSD long London 09:15`",
+        parse_mode="Markdown"
+    )
+    bot.register_next_step_handler(msg, process_predict_step)
+
+
+def process_predict_step(message):
+    chat_id = message.chat.id
+    parts = message.text.strip().split()
+
+    if len(parts) != 4:
+        bot.send_message(chat_id, "Invalid format. Use: `ASSET DIRECTION SESSION HH:MM`", parse_mode="Markdown")
+        return
+
+    asset, direction, session, time_str = parts
+    try:
+        hh, mm = time_str.split(":")
+        hour = int(hh)
+        day_of_week = datetime_now_weekday()
+    except ValueError:
+        bot.send_message(chat_id, f"Invalid time '{time_str}', expected HH:MM.", parse_mode="Markdown")
+        return
+
+    try:
+        bundle = load_model(chat_id, DATA_DIR)
+        prob = predict_win_probability(bundle, asset.upper(), direction.lower(), session, hour, day_of_week)
+        bot.send_message(
+            chat_id,
+            f"Predicted win probability for {asset.upper()} {direction.lower()} "
+            f"({session}, {time_str}): {prob:.1%}\n\n"
+            "Treat this as a directional signal only, not a guarantee.",
+        )
+    except ValueError as e:
+        bot.send_message(chat_id, str(e))
+    except Exception as e:
+        bot.send_message(chat_id, f"Error running prediction: {e}")
+
+
+def datetime_now_weekday():
+    from datetime import datetime
+    return datetime.utcnow().weekday()
+
+
 if __name__ == "__main__":
     bot.set_my_commands([
         telebot.types.BotCommand("start", "Start the bot"),
@@ -503,6 +575,8 @@ if __name__ == "__main__":
         telebot.types.BotCommand("help", "Help"),
         telebot.types.BotCommand("filter", "Filter by direction/asset"),
         telebot.types.BotCommand("import_mt5", "Import MT5 history"),
+        telebot.types.BotCommand("train_model", "Train win-probability model"),
+        telebot.types.BotCommand("predict", "Predict win probability for a trade"),
     ])
     print("Bot is listening for commands...")
     bot.infinity_polling()
