@@ -1,6 +1,6 @@
 import json
 import numpy as np
-from datetime import datetime
+from datetime import datetime, time as dtime
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -45,17 +45,47 @@ def load_trades(chat_id, asset=None, direction=None):
     return np.array([r["r"] for r in records], dtype=float)
 
 
-def append_trade(chat_id, r, asset=None, direction=None, timestamp=None):
+def trading_session(timestamp):
+    t = datetime.fromisoformat(timestamp).time()
+
+    if t >= dtime(18, 0) or t < dtime(2, 0):
+        return "Tokyo"
+    if dtime(2, 0) <= t < dtime(3, 0):
+        return "Frankfurt"
+    if dtime(3, 0) <= t < dtime(8, 0):
+        return "London"
+    if dtime(8, 0) <= t < dtime(12, 0):
+        return "New York"
+    return "Overlap"
+
+
+def build_timestamp(time_str=None):
+    """time_str: optional 'HH:MM' (UTC, 24h). Defaults to current UTC time."""
+    if not time_str:
+        return datetime.utcnow().isoformat(timespec="seconds")
+
+    try:
+        hh, mm = time_str.split(":")
+        t = dtime(int(hh), int(mm))
+    except (ValueError, TypeError):
+        raise ValueError(f"invalid time '{time_str}', expected HH:MM (24h)")
+
+    return datetime.combine(datetime.utcnow().date(), t).isoformat(timespec="seconds")
+
+
+def append_trade(chat_id, r, asset=None, direction=None, time_str=None):
     path = get_trades_path(chat_id)
     path.parent.mkdir(exist_ok=True)
 
+    timestamp = build_timestamp(time_str)
+
     record = {
-        "r": r, 
-        "asset": asset, 
+        "r": r,
+        "asset": asset,
         "direction": direction,
-        "timestamp": timestamp or datetime.utcnow().isoformat(timespec="seconds")
-        }
-    
+        "timestamp": timestamp,
+        "session": trading_session(timestamp),
+    }
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -64,6 +94,7 @@ def clear_trades(chat_id):
     path = get_trades_path(chat_id)
     path.parent.mkdir(exist_ok=True)
     path.write_text("")
+
 
 def filter_trades(chat_id, direction=None, excluded_assets=None, session=None):
     records = load_trade_records(chat_id)
@@ -74,24 +105,11 @@ def filter_trades(chat_id, direction=None, excluded_assets=None, session=None):
     if excluded_assets:
         excluded = {a.upper() for a in excluded_assets}
         records = [r for r in records if r.get("asset", "").upper() not in excluded]
-    
+
     if session:
-        records = [r for r in records if r.get("timestamp") and trading_session(r["timestamp"]) == session]
+        records = [r for r in records if r.get("session", "").lower() == session.lower()]
 
     if not records:
         raise ValueError("No trades match the given filters.")
 
     return np.array([r["r"] for r in records], dtype=float)
-    
-def trading_session(timestamp):
-    t = datetime.fromisoformat(timestamp).time()
-
-    if t.hour >= 18 or t.hour < 2:
-        return "Tokyo"
-    if 2 <= t.hour < 3:
-        return "Frankfirt"
-    if 3 <= t.hour < 8:
-        return "London"
-    if 8 <= t.hour < 12:
-        return "New York"
-    return "Overlap"

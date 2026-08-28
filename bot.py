@@ -164,7 +164,9 @@ def handle_add_trade(message):
     chat_id = message.chat.id
     msg = bot.send_message(
         chat_id,
-        "Send: `R ASSET DIRECTION`\nExample: `1.5 EURUSD long` or `-1 XAUUSD short`",
+        "Send: `R ASSET DIRECTION [HH:MM]`\n"
+        "Time is optional (UTC, 24h) — defaults to now if omitted.\n"
+        "Example: `1.5 EURUSD long` or `-1 XAUUSD short 14:30`",
         parse_mode="Markdown"
     )
     bot.register_next_step_handler(msg, process_trade_step)
@@ -177,9 +179,17 @@ def parse_trade_line(line):
     r = float(parts[0])
     asset = parts[1].upper() if len(parts) > 1 else None
     direction = parts[2].lower() if len(parts) > 2 else None
+    time_str = parts[3] if len(parts) > 3 else None
     if direction and direction not in ("long", "short"):
         raise ValueError(f"direction must be 'long' or 'short', got '{direction}'")
-    return r, asset, direction
+    if time_str:
+        try:
+            hh, mm = time_str.split(":")
+            if not (0 <= int(hh) <= 23 and 0 <= int(mm) <= 59):
+                raise ValueError
+        except ValueError:
+            raise ValueError(f"invalid time '{time_str}', expected HH:MM (24h)")
+    return r, asset, direction, time_str
 
 
 def process_trade_step(message):
@@ -187,20 +197,20 @@ def process_trade_step(message):
     user_input = message.text.strip()
 
     try:
-        r, asset, direction = parse_trade_line(user_input)
+        r, asset, direction, time_str = parse_trade_line(user_input)
     except ValueError as e:
         bot.send_message(
             chat_id,
-            f"Invalid format: {str(e)}\nUse: `R ASSET DIRECTION`, e.g. `1.5 EURUSD long`",
+            f"Invalid format: {str(e)}\nUse: `R ASSET DIRECTION [HH:MM]`, e.g. `1.5 EURUSD long 14:30`",
             parse_mode="Markdown"
         )
         return
 
     try:
-        append_trade(chat_id, r, asset, direction)
+        append_trade(chat_id, r, asset, direction, time_str)
         bot.send_message(
             chat_id,
-            f"Added: `{r:+.2f}R` {asset or ''} {direction or ''}\nRun /run to recalculate metrics.",
+            f"Added: `{r:+.2f}R` {asset or ''} {direction or ''} {time_str or ''}\nRun /run to recalculate metrics.",
             parse_mode="Markdown"
         )
     except Exception as e:
@@ -213,10 +223,11 @@ def handle_add_list(message):
     chat_id = message.chat.id
     msg = bot.send_message(
         chat_id,
-        "Send trades, one per line: `R ASSET DIRECTION`\n\n"
+        "Send trades, one per line: `R ASSET DIRECTION [HH:MM]`\n"
+        "Time is optional (UTC, 24h) — defaults to now if omitted.\n\n"
         "Example:\n"
-        "1.5 EURUSD long\n"
-        "-1 XAUUSD short\n"
+        "1.5 EURUSD long 09:15\n"
+        "-1 XAUUSD short 21:40\n"
         "0.5 GBPUSD long",
         parse_mode="Markdown"
     )
@@ -240,7 +251,7 @@ def process_list_step(message):
             continue
 
         try:
-            r, asset, direction = parse_trade_line(line)
+            r, asset, direction, time_str = parse_trade_line(line)
         except ValueError as e:
             bot.send_message(
                 chat_id,
@@ -250,15 +261,15 @@ def process_list_step(message):
             )
             return
 
-        parsed.append((r, asset, direction))
+        parsed.append((r, asset, direction, time_str))
 
     if not parsed:
         bot.send_message(chat_id, "No valid trades found.")
         return
 
     try:
-        for r, asset, direction in parsed:
-            append_trade(chat_id, r, asset, direction)
+        for r, asset, direction, time_str in parsed:
+            append_trade(chat_id, r, asset, direction, time_str)
 
         bot.send_message(
             chat_id,
@@ -354,9 +365,10 @@ def handle_filter(message):
     chat_id = message.chat.id
     msg = bot.send_message(
         chat_id,
-        "Send: `DIRECTION, EXCLUDED_ASSET1, EXCLUDED_ASSET2, ...`\n"
+        "Send: `DIRECTION, SESSION, EXCLUDED_ASSET1, EXCLUDED_ASSET2, ...`\n"
         "DIRECTION: `long`, `short`, or leave empty for both.\n"
-        "Example: `long, XAUUSD, EURUSD`",
+        "SESSION: `Tokyo`, `Frankfurt`, `London`, `New York`, `Overlap`, or leave empty for all.\n"
+        "Example: `long, London, XAUUSD, EURUSD`",
         parse_mode="Markdown"
     )
     bot.register_next_step_handler(msg, process_filter_step)
@@ -366,15 +378,17 @@ def process_filter_step(message):
     chat_id = message.chat.id
     parts = [p.strip() for p in message.text.split(",")]
 
-    direction = parts[0].lower() if parts[0] else None
+    direction = parts[0].lower() if parts and parts[0] else None
     if direction not in (None, "", "long", "short"):
         bot.send_message(chat_id, f"Invalid direction: `{direction}`", parse_mode="Markdown")
         return
     direction = direction or None
-    excluded_assets = [a.upper() for a in parts[1:] if a]
+
+    session = parts[1] if len(parts) > 1 and parts[1] else None
+    excluded_assets = [a.upper() for a in parts[2:] if a]
 
     try:
-        trades = filter_trades(chat_id, direction=direction, excluded_assets=excluded_assets)
+        trades = filter_trades(chat_id, direction=direction, excluded_assets=excluded_assets, session=session)
 
         n_simulations = 1000
         n_trades_per_sim = len(trades)
@@ -384,6 +398,7 @@ def process_filter_step(message):
 
         report = (
             f"Direction: {direction or 'both'}\n"
+            f"Session: {session or 'all'}\n"
             f"Excluded: {', '.join(excluded_assets) or 'none'}\n"
             f"Trades: {len(trades)}\n\n"
             "MONTE CARLO SIMULATION\n"
