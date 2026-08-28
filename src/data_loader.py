@@ -55,7 +55,7 @@ def trading_session(timestamp):
     if dtime(3, 0) <= t < dtime(8, 0):
         return "London"
     if dtime(8, 0) <= t < dtime(12, 0):
-        return "New York"
+        return "NewYork"
     return "Overlap"
 
 

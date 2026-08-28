@@ -374,7 +374,7 @@ def handle_filter(message):
         chat_id,
         "Send: `DIRECTION, SESSION, EXCLUDED_ASSET1, EXCLUDED_ASSET2, ...`\n"
         "DIRECTION: `long`, `short`, or leave empty for both.\n"
-        "SESSION: `Tokyo`, `Frankfurt`, `London`, `New York`, `Overlap`, or leave empty for all.\n"
+        "SESSION: `Tokyo`, `Frankfurt`, `London`, `NewYork`, `Overlap`, or leave empty for all.\n"
         "Example: `long, London, XAUUSD, EURUSD`",
         parse_mode="Markdown"
     )
@@ -527,8 +527,10 @@ def handle_predict(message):
     chat_id = message.chat.id
     msg = bot.send_message(
         chat_id,
-        "Send: `ASSET DIRECTION SESSION HH:MM`\n"
-        "Example: `EURUSD long London 09:15`",
+        "Send one or more lines: `ASSET DIRECTION SESSION HH:MM`\n"
+        "Example:\n"
+        "EURUSD long London 09:15\n"
+        "XAUUSD short Tokyo 22:00",
         parse_mode="Markdown"
     )
     bot.register_next_step_handler(msg, process_predict_step)
@@ -536,34 +538,56 @@ def handle_predict(message):
 
 def process_predict_step(message):
     chat_id = message.chat.id
-    parts = message.text.strip().split()
+    lines = [l.strip() for l in message.text.strip().splitlines() if l.strip()]
 
-    if len(parts) != 4:
-        bot.send_message(chat_id, "Invalid format. Use: `ASSET DIRECTION SESSION HH:MM`", parse_mode="Markdown")
-        return
-
-    asset, direction, session, time_str = parts
-    try:
-        hh, mm = time_str.split(":")
-        hour = int(hh)
-        day_of_week = datetime_now_weekday()
-    except ValueError:
-        bot.send_message(chat_id, f"Invalid time '{time_str}', expected HH:MM.", parse_mode="Markdown")
+    if not lines:
+        bot.send_message(chat_id, "Empty input. Please run /predict again.")
         return
 
     try:
         bundle = load_model(chat_id, DATA_DIR)
-        prob = predict_win_probability(bundle, asset.upper(), direction.lower(), session, hour, day_of_week)
-        bot.send_message(
-            chat_id,
-            f"Predicted win probability for {asset.upper()} {direction.lower()} "
-            f"({session}, {time_str}): {prob:.1%}\n\n"
-            "Treat this as a directional signal only, not a guarantee.",
-        )
     except ValueError as e:
         bot.send_message(chat_id, str(e))
-    except Exception as e:
-        bot.send_message(chat_id, f"Error running prediction: {e}")
+        return
+
+    results = []
+    for line_number, line in enumerate(lines, start=1):
+        parts = line.split()
+        if len(parts) != 4:
+            bot.send_message(
+                chat_id,
+                f"Invalid format on line {line_number}: `{line}`\nUse: `ASSET DIRECTION SESSION HH:MM`",
+                parse_mode="Markdown"
+            )
+            return
+
+        asset, direction, session, time_str = parts
+        try:
+            hh, mm = time_str.split(":")
+            hour = int(hh)
+            if not (0 <= hour <= 23 and 0 <= int(mm) <= 59):
+                raise ValueError
+        except ValueError:
+            bot.send_message(chat_id, f"Invalid time on line {line_number}: '{time_str}', expected HH:MM.")
+            return
+
+        day_of_week = datetime_now_weekday()
+
+        try:
+            prob = predict_win_probability(bundle, asset.upper(), direction.lower(), session, hour, day_of_week)
+        except Exception as e:
+            bot.send_message(chat_id, f"Error on line {line_number}: {e}")
+            return
+
+        results.append((asset.upper(), direction.lower(), session, time_str, prob))
+
+    lines_out = []
+    for asset, direction, session, time_str, prob in results:
+        lines_out.append(f"{asset} {direction} {session} {time_str} — {prob:.1%}")
+    lines_out.append("")
+    lines_out.append("Directional signal only, not a guarantee.")
+
+    bot.send_message(chat_id, "\n".join(lines_out))
 
 
 def datetime_now_weekday():
