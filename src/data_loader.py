@@ -1,5 +1,6 @@
 import json
 import numpy as np
+from datetime import datetime
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -44,11 +45,17 @@ def load_trades(chat_id, asset=None, direction=None):
     return np.array([r["r"] for r in records], dtype=float)
 
 
-def append_trade(chat_id, r, asset=None, direction=None):
+def append_trade(chat_id, r, asset=None, direction=None, timestamp=None):
     path = get_trades_path(chat_id)
     path.parent.mkdir(exist_ok=True)
 
-    record = {"r": r, "asset": asset, "direction": direction}
+    record = {
+        "r": r, 
+        "asset": asset, 
+        "direction": direction,
+        "timestamp": timestamp or datetime.utcnow().isoformat(timespec="seconds")
+        }
+    
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -58,7 +65,7 @@ def clear_trades(chat_id):
     path.parent.mkdir(exist_ok=True)
     path.write_text("")
 
-def filter_trades(chat_id, direction=None, excluded_assets=None):
+def filter_trades(chat_id, direction=None, excluded_assets=None, session=None):
     records = load_trade_records(chat_id)
 
     if direction:
@@ -67,9 +74,24 @@ def filter_trades(chat_id, direction=None, excluded_assets=None):
     if excluded_assets:
         excluded = {a.upper() for a in excluded_assets}
         records = [r for r in records if r.get("asset", "").upper() not in excluded]
+    
+    if session:
+        records = [r for r in records if r.get("timestamp") and trading_session(r["timestamp"]) == session]
 
     if not records:
         raise ValueError("No trades match the given filters.")
 
     return np.array([r["r"] for r in records], dtype=float)
     
+def trading_session(timestamp):
+    t = datetime.fromisoformat(timestamp).time()
+
+    if t.hour >= 18 or t.hour < 2:
+        return "Tokyo"
+    if 2 <= t.hour < 3:
+        return "Frankfirt"
+    if 3 <= t.hour < 8:
+        return "London"
+    if 8 <= t.hour < 12:
+        return "New York"
+    return "Overlap"

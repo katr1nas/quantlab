@@ -12,7 +12,15 @@ import telebot
 
 matplotlib.use('agg')
 
-from src.data_loader import load_trades, get_trades_path, append_trade, clear_trades, load_trade_records, filter_trades
+from src.data_loader import (
+    load_trades,
+    get_trades_path,
+    append_trade,
+    clear_trades,
+    load_trade_records,
+    filter_trades,
+    DATA_DIR,
+)
 from src.metrics import (
     expectancy,
     max_drawdown,
@@ -20,12 +28,10 @@ from src.metrics import (
     median,
     profit_factor,
     trade_sharpe,
-    trade_sharpe as sharpe,
     winrate,
 )
 from src.monte_carlo import monte_carlo
 from src.plots import equity_curves, results_distribution
-from src.data_loader import load_trades, get_trades_path, append_trade, clear_trades, load_trade_records, filter_trades, DATA_DIR
 from src.mt5_parser import parse_mt5_html
 
 # --- CONFIGURATION ---
@@ -36,7 +42,7 @@ STATS_PATH = BASE_DIR / "data" / "stats.json"
 load_dotenv(dotenv_path=ENV_PATH)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")  # твой личный chat_id, для /stats
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -111,7 +117,6 @@ def run_simulation_and_get_report(chat_id):
 
 
 def fig_to_bytes():
-    """Captures the current active Matplotlib plot into RAM."""
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight', dpi=150)
     buf.seek(0)
@@ -136,17 +141,14 @@ def handle_run_command(message):
     try:
         report, results, final_results = run_simulation_and_get_report(chat_id)
 
-        # 1. Send text report
         formatted_message = f"```\n{report}\n```"
         bot.send_message(chat_id, formatted_message, parse_mode="Markdown")
 
-        # 2. Plot & send Equity Curves
         plt.close('all')
         equity_curves(results)
         img1 = fig_to_bytes()
         bot.send_photo(chat_id, img1, caption="Equity Curves")
 
-        # 3. Plot & send Distribution
         plt.close('all')
         results_distribution(final_results)
         img2 = fig_to_bytes()
@@ -323,24 +325,28 @@ def handle_trades(message):
             bot.send_message(chat_id, text[i:i+4000])
     else:
         bot.send_message(chat_id, text)
+
+
+@bot.message_handler(commands=['stats'])
 def handle_stats(message):
     chat_id = message.chat.id
 
     if ADMIN_CHAT_ID and str(chat_id) != str(ADMIN_CHAT_ID):
-        return  # тихо игнорируем чужих
+        return
 
     stats = load_stats()
     users = stats["users"]
 
     if not users:
-        bot.send_message(chat_id, "Пока никто не пользовался ботом.")
+        bot.send_message(chat_id, "No usage yet.")
         return
 
-    lines = [f"Всего пользователей: {len(users)}", f"Всего сообщений: {stats['total_messages']}", ""]
+    lines = [f"Users: {len(users)}", f"Total messages: {stats['total_messages']}", ""]
     for uid, data in sorted(users.items(), key=lambda x: -x[1]["messages"]):
-        lines.append(f"@{data['username']} — {data['messages']} сообщений")
+        lines.append(f"@{data['username']} — {data['messages']} messages")
 
     bot.send_message(chat_id, "\n".join(lines))
+
 
 @bot.message_handler(commands=['filter'])
 def handle_filter(message):
@@ -389,7 +395,7 @@ def process_filter_step(message):
             "----------------\n"
             f"Expectancy: {fmt(expectancy(trades), '.4f')}\n"
             f"Profit Factor: {fmt(profit_factor(trades))}\n"
-            f"Sharpe: {fmt(sharpe(trades))}\n"
+            f"Sharpe: {fmt(trade_sharpe(trades))}\n"
             f"Winrate: {winrate(trades):.2%}"
         )
         bot.send_message(chat_id, f"```\n{report}\n```", parse_mode="Markdown")
@@ -406,6 +412,7 @@ def process_filter_step(message):
         bot.send_message(chat_id, str(e))
     except Exception as e:
         bot.send_message(chat_id, f"Error running filtered simulation: {e}")
+
 
 @bot.message_handler(commands=['import_mt5'])
 def handle_import_mt5(message):
@@ -470,18 +477,17 @@ def process_mt5_file_step(message, balance, risk_pct):
     )
 
 
-
 if __name__ == "__main__":
     bot.set_my_commands([
-        telebot.types.BotCommand("start", "Запустить бота"),
-        telebot.types.BotCommand("run", "Запустить Monte Carlo симуляцию"),
-        telebot.types.BotCommand("add_trade", "Добавить одну сделку"),
-        telebot.types.BotCommand("add_list", "Добавить список сделок"),
-        telebot.types.BotCommand("clear", "Очистить все сделки"),
-        telebot.types.BotCommand("trades", "Показать список сделок"),
-        telebot.types.BotCommand("help", "Помощь"),
-        telebot.types.BotCommand("filter", "Фильтр по направлению/активу"),
-        telebot.types.BotCommand("import_mt5", "Импорт истории из MT5"),
+        telebot.types.BotCommand("start", "Start the bot"),
+        telebot.types.BotCommand("run", "Run Monte Carlo simulation"),
+        telebot.types.BotCommand("add_trade", "Add one trade"),
+        telebot.types.BotCommand("add_list", "Add a list of trades"),
+        telebot.types.BotCommand("clear", "Clear all trades"),
+        telebot.types.BotCommand("trades", "List trades"),
+        telebot.types.BotCommand("help", "Help"),
+        telebot.types.BotCommand("filter", "Filter by direction/asset"),
+        telebot.types.BotCommand("import_mt5", "Import MT5 history"),
     ])
     print("Bot is listening for commands...")
     bot.infinity_polling()
