@@ -39,6 +39,7 @@ from src.ml.win_predictor import (
     load_model,
     predict_win_probability,
     predict_batch,
+    evaluate_on_holdout,
 )
 
 # --- CONFIGURATION ---
@@ -507,18 +508,73 @@ def handle_train_model(message):
     try:
         records = load_trade_records(chat_id)
         bundle = train_win_model(records)
+        holdout = evaluate_on_holdout(bundle)
         save_model(bundle, chat_id, DATA_DIR)
 
-        lines = [f"Model trained on {bundle['n_trades_trained_on']} trades.", "", "Feature importance:"]
+        lines = [
+            f"Model trained on {bundle['n_trades_trained_on']} trades "
+            f"(most recent {holdout['n_holdout']} held out for testing).",
+            "",
+            f"Holdout accuracy (real signal): {holdout['accuracy']:.1%}",
+        ]
+        if holdout["auc"] is not None:
+            lines.append(f"Holdout AUC: {holdout['auc']:.3f}  (0.5 = no better than random)")
+        lines.append("")
+        lines.append("Feature importance (from training data):")
         for name, imp in list(bundle["model"].feature_importance().items())[:8]:
             lines.append(f"  {name}: {imp:.2%}")
         lines.append("")
-        lines.append("Run /predict to get a win probability for a hypothetical trade.")
+        lines.append("Run /predict for a hypothetical trade, or /predict_all / /backtest_model.")
         bot.send_message(chat_id, "\n".join(lines))
     except ValueError as e:
         bot.send_message(chat_id, str(e))
     except Exception as e:
         bot.send_message(chat_id, f"Error training model: {e}")
+
+
+@bot.message_handler(commands=['backtest_model'])
+def handle_backtest_model(message):
+    track_usage(message)
+    chat_id = message.chat.id
+
+    try:
+        bundle = load_model(chat_id, DATA_DIR)
+        holdout_records = bundle.get("holdout_records") or []
+        if not holdout_records:
+            bot.send_message(chat_id, "No holdout set stored on this model. Run /train_model again.")
+            return
+
+        results = predict_batch(bundle, holdout_records)
+        holdout = evaluate_on_holdout(bundle)
+
+        lines = [f"Holdout backtest — {holdout['n_holdout']} trades the model never trained on:", ""]
+        for i, res in enumerate(results, start=1):
+            r = res["record"]
+            asset = r.get("asset") or "-"
+            direction = r.get("direction") or "-"
+            actual = "WIN" if res["actual_win"] else "LOSS"
+            predicted_label = "WIN" if res["predicted_prob"] >= 0.5 else "LOSS"
+            lines.append(
+                f"{i}. {asset} {direction} — pred {res['predicted_prob']:.0%} ({predicted_label}) / actual {actual}"
+            )
+
+        lines.append("")
+        lines.append(f"Holdout accuracy: {holdout['accuracy']:.1%}")
+        if holdout["auc"] is not None:
+            lines.append(f"Holdout AUC: {holdout['auc']:.3f}")
+        lines.append("This is out-of-sample — the model never saw these trades during training.")
+
+        text = "\n".join(lines)
+        if len(text) > 4000:
+            for i in range(0, len(text), 4000):
+                bot.send_message(chat_id, text[i:i + 4000])
+        else:
+            bot.send_message(chat_id, text)
+
+    except ValueError as e:
+        bot.send_message(chat_id, str(e))
+    except Exception as e:
+        bot.send_message(chat_id, f"Error running backtest: {e}")
 
 
 @bot.message_handler(commands=['predict'])
@@ -605,7 +661,7 @@ def handle_predict_all(message):
         bundle = load_model(chat_id, DATA_DIR)
         results = predict_batch(bundle, records)
 
-        lines = [f"Predictions for all {len(results)} stored trades:", ""]
+        lines = [f"Predictions for all {len(results)} stored trades (mix of train + holdout — not a clean metric):", ""]
         correct = 0
         for i, res in enumerate(results, start=1):
             r = res["record"]
@@ -622,7 +678,7 @@ def handle_predict_all(message):
         accuracy = correct / len(results) if results else 0
         lines.append("")
         lines.append(f"Directional accuracy on this sample: {accuracy:.1%}")
-        lines.append("(Trained and evaluated on the same data — this is fit quality, not out-of-sample skill.)")
+        lines.append("(Real out-of-sample signal — run /backtest_model instead.)")
 
         text = "\n".join(lines)
         if len(text) > 4000:
@@ -649,6 +705,7 @@ if __name__ == "__main__":
         telebot.types.BotCommand("filter", "Filter by direction/asset"),
         telebot.types.BotCommand("import_mt5", "Import MT5 history"),
         telebot.types.BotCommand("train_model", "Train win-probability model"),
+        telebot.types.BotCommand("backtest_model", "Score model on holdout (out-of-sample)"),
         telebot.types.BotCommand("predict", "Predict win probability for a trade"),
         telebot.types.BotCommand("predict_all", "Predict win probability for all stored trades"),
     ])

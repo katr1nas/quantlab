@@ -1,27 +1,45 @@
 import pickle
 from pathlib import Path
 
+from sklearn.metrics import roc_auc_score
+
 from src.ml.boosting import Boosting
 from src.ml.features import build_feature_matrix, encode_single
 
-MIN_TRADES_TO_TRAIN = 30
+MIN_TRADES_TO_TRAIN = 150
 
 
 def model_path(chat_id, data_dir):
     return Path(data_dir) / f"model_{chat_id}.pkl"
 
 
-def train_win_model(records, n_estimators=50, learning_rate=0.15, max_depth=3):
+def split_train_holdout(records, holdout_fraction=0.3):
+    sorted_records = sorted(records, key=lambda r: r.get("timestamp") or "")
+    n_holdout = max(1, int(len(sorted_records) * holdout_fraction))
+    train_records = sorted_records[:-n_holdout]
+    holdout_records = sorted_records[-n_holdout:]
+    return train_records, holdout_records
+
+
+def train_win_model(records, holdout_fraction=0.3, n_estimators=50, learning_rate=0.15, max_depth=3):
     if len(records) < MIN_TRADES_TO_TRAIN:
         raise ValueError(
             f"Need at least {MIN_TRADES_TO_TRAIN} trades to train (have {len(records)}). "
             "Fewer than that and the model just memorizes noise."
         )
 
-    X, y, feature_names, asset_vocab, session_vocab = build_feature_matrix(records)
+    train_records, holdout_records = split_train_holdout(records, holdout_fraction)
+
+    if len(train_records) < MIN_TRADES_TO_TRAIN * (1 - holdout_fraction):
+        raise ValueError(
+            f"After holding out {holdout_fraction:.0%} for testing, only {len(train_records)} "
+            "trades remain for training — not enough. Add more trades."
+        )
+
+    X, y, feature_names, asset_vocab, session_vocab = build_feature_matrix(train_records)
 
     if len(set(y.tolist())) < 2:
-        raise ValueError("All trades are the same outcome (all wins or all losses) — nothing to learn.")
+        raise ValueError("All training trades are the same outcome (all wins or all losses) — nothing to learn.")
 
     model = Boosting(
         base_model_params={"max_depth": max_depth},
@@ -38,7 +56,31 @@ def train_win_model(records, n_estimators=50, learning_rate=0.15, max_depth=3):
         "model": model,
         "asset_vocab": asset_vocab,
         "session_vocab": session_vocab,
-        "n_trades_trained_on": len(records),
+        "n_trades_trained_on": len(train_records),
+        "holdout_records": holdout_records,
+    }
+
+
+def evaluate_on_holdout(bundle):
+    holdout_records = bundle.get("holdout_records") or []
+    if not holdout_records:
+        raise ValueError("No holdout set stored on this model. Retrain to get one.")
+
+    results = predict_batch(bundle, holdout_records)
+    y_true = [1 if r["actual_win"] else 0 for r in results]
+    y_prob = [r["predicted_prob"] for r in results]
+
+    correct = sum(1 for yt, yp in zip(y_true, y_prob) if (yp >= 0.5) == bool(yt))
+    accuracy = correct / len(results)
+
+    auc = None
+    if len(set(y_true)) == 2:
+        auc = roc_auc_score(y_true, y_prob)
+
+    return {
+        "n_holdout": len(results),
+        "accuracy": accuracy,
+        "auc": auc,
     }
 
 
@@ -67,10 +109,6 @@ def predict_win_probability(bundle, asset, direction, session, hour, day_of_week
 
 
 def predict_batch(bundle, records):
-    """Run the model against a full list of trade records at once.
-
-    Returns list of dicts: {record, predicted_prob, actual_win}.
-    """
     X, y, _, _, _ = build_feature_matrix(
         records,
         asset_vocab=bundle["asset_vocab"],
