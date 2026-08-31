@@ -533,6 +533,48 @@ def handle_train_model(message):
 
 
 @bot.message_handler(commands=['backtest_model'])
+def format_prediction_report(header_lines, results, footer_lines):
+    """Shared formatter for /predict_all and /backtest_model.
+
+    Sorts by model confidence (most confident calls first), marks
+    each line ✅/❌, and puts a correct/incorrect count up top so the
+    reader doesn't have to tally by hand.
+    """
+    correct = sum(1 for r in results if (r["predicted_prob"] >= 0.5) == r["actual_win"])
+    total = len(results)
+
+    ranked = sorted(results, key=lambda r: abs(r["predicted_prob"] - 0.5), reverse=True)
+
+    lines = list(header_lines)
+    lines.append(f"✅ {correct} correct   ❌ {total - correct} incorrect   ({total} total)")
+    lines.append("Sorted by model confidence, most confident first.")
+    lines.append("")
+
+    for res in ranked:
+        r = res["record"]
+        asset = (r.get("asset") or "-").ljust(7)
+        direction = (r.get("direction") or "-").ljust(5)
+        actual = "WIN " if res["actual_win"] else "LOSS"
+        predicted_label = "WIN " if res["predicted_prob"] >= 0.5 else "LOSS"
+        mark = "✅" if predicted_label.strip() == actual.strip() else "❌"
+        conf = res["predicted_prob"] if res["predicted_prob"] >= 0.5 else 1 - res["predicted_prob"]
+        lines.append(
+            f"{mark} {asset} {direction} pred {predicted_label} ({conf:.0%} conf)  actual {actual}"
+        )
+
+    lines.append("")
+    lines.extend(footer_lines)
+    return "\n".join(lines)
+
+
+def send_long_message(chat_id, text):
+    if len(text) > 4000:
+        for i in range(0, len(text), 4000):
+            bot.send_message(chat_id, text[i:i + 4000])
+    else:
+        bot.send_message(chat_id, text)
+
+
 def handle_backtest_model(message):
     track_usage(message)
     chat_id = message.chat.id
@@ -547,29 +589,14 @@ def handle_backtest_model(message):
         results = predict_batch(bundle, holdout_records)
         holdout = evaluate_on_holdout(bundle)
 
-        lines = [f"Holdout backtest — {holdout['n_holdout']} trades the model never trained on:", ""]
-        for i, res in enumerate(results, start=1):
-            r = res["record"]
-            asset = r.get("asset") or "-"
-            direction = r.get("direction") or "-"
-            actual = "WIN" if res["actual_win"] else "LOSS"
-            predicted_label = "WIN" if res["predicted_prob"] >= 0.5 else "LOSS"
-            lines.append(
-                f"{i}. {asset} {direction} — pred {res['predicted_prob']:.0%} ({predicted_label}) / actual {actual}"
-            )
-
-        lines.append("")
-        lines.append(f"Holdout accuracy: {holdout['accuracy']:.1%}")
+        header = [f"Holdout backtest — {holdout['n_holdout']} trades the model never trained on:", ""]
+        footer = [f"Holdout accuracy: {holdout['accuracy']:.1%}"]
         if holdout["auc"] is not None:
-            lines.append(f"Holdout AUC: {holdout['auc']:.3f}")
-        lines.append("This is out-of-sample — the model never saw these trades during training.")
+            footer.append(f"Holdout AUC: {holdout['auc']:.3f}")
+        footer.append("Out-of-sample — the model never saw these trades during training.")
 
-        text = "\n".join(lines)
-        if len(text) > 4000:
-            for i in range(0, len(text), 4000):
-                bot.send_message(chat_id, text[i:i + 4000])
-        else:
-            bot.send_message(chat_id, text)
+        text = format_prediction_report(header, results, footer)
+        send_long_message(chat_id, text)
 
     except ValueError as e:
         bot.send_message(chat_id, str(e))
@@ -661,31 +688,11 @@ def handle_predict_all(message):
         bundle = load_model(chat_id, DATA_DIR)
         results = predict_batch(bundle, records)
 
-        lines = [f"Predictions for all {len(results)} stored trades (mix of train + holdout — not a clean metric):", ""]
-        correct = 0
-        for i, res in enumerate(results, start=1):
-            r = res["record"]
-            asset = r.get("asset") or "-"
-            direction = r.get("direction") or "-"
-            actual = "WIN" if res["actual_win"] else "LOSS"
-            predicted_label = "WIN" if res["predicted_prob"] >= 0.5 else "LOSS"
-            if predicted_label == actual:
-                correct += 1
-            lines.append(
-                f"{i}. {asset} {direction} — pred {res['predicted_prob']:.0%} ({predicted_label}) / actual {actual}"
-            )
+        header = [f"Predictions for all {len(results)} stored trades (mix of train + holdout — not a clean metric):", ""]
+        footer = ["(Real out-of-sample signal — run /backtest_model instead.)"]
 
-        accuracy = correct / len(results) if results else 0
-        lines.append("")
-        lines.append(f"Directional accuracy on this sample: {accuracy:.1%}")
-        lines.append("(Real out-of-sample signal — run /backtest_model instead.)")
-
-        text = "\n".join(lines)
-        if len(text) > 4000:
-            for i in range(0, len(text), 4000):
-                bot.send_message(chat_id, text[i:i + 4000])
-        else:
-            bot.send_message(chat_id, text)
+        text = format_prediction_report(header, results, footer)
+        send_long_message(chat_id, text)
 
     except ValueError as e:
         bot.send_message(chat_id, str(e))
