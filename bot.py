@@ -140,6 +140,42 @@ def send_welcome(message):
     bot.reply_to(message, "Bot ready. Send /run or /mc to execute the Monte Carlo simulation.")
 
 
+@bot.message_handler(commands=['instructions'])
+def handle_instructions(message):
+    track_usage(message)
+    chat_id = message.chat.id
+
+    text = (
+        "WHAT THE ML PREDICTIONS MEAN\n"
+        "-----------------------------\n"
+        "/predict, /predict_all and /backtest_model do NOT forecast future "
+        "price. They estimate the probability that a trade with given "
+        "traits (asset, direction, session, hour) would have been a WIN, "
+        "based on the statistical pattern in your past trades.\n\n"
+        "How it works:\n"
+        "1. /train_model fits a gradient boosting model on your stored "
+        "trades: input = asset/direction/session/hour/day_of_week, "
+        "output = WIN (r > 0) or LOSS.\n"
+        "2. /predict takes a hypothetical trade and returns a probability, "
+        "e.g. 67% — the model's estimate based on your trading history, "
+        "nothing more.\n"
+        "3. /backtest_model checks the model on trades it never trained on "
+        "(holdout). This is the number that actually reflects skill.\n\n"
+        "How to read the numbers:\n"
+        "- Accuracy ~50% = the model guesses no better than a coin flip.\n"
+        "- AUC ~0.5 = same thing, measured differently (0.5 = random, "
+        "1.0 = perfect separation of WIN/LOSS).\n"
+        "- AUC meaningfully above 0.5 (e.g. 0.65+) on the HOLDOUT set is "
+        "the only signal worth trusting. High training accuracy with low "
+        "holdout accuracy just means the model memorized noise.\n\n"
+        "A prediction is a statistical estimate from historical data, "
+        "never a guarantee. Trade counts under a few hundred are usually "
+        "too small for the model to find anything real — expect AUC near "
+        "0.5 until you have real, sizeable history."
+    )
+    bot.send_message(chat_id, text)
+
+
 @bot.message_handler(commands=['run', 'mc'])
 def handle_run_command(message):
     track_usage(message)
@@ -709,6 +745,7 @@ if __name__ == "__main__":
         telebot.types.BotCommand("clear", "Clear all trades"),
         telebot.types.BotCommand("trades", "List trades"),
         telebot.types.BotCommand("help", "Help"),
+        telebot.types.BotCommand("instructions", "What the ML predictions mean"),
         telebot.types.BotCommand("filter", "Filter by direction/asset"),
         telebot.types.BotCommand("import_mt5", "Import MT5 history"),
         telebot.types.BotCommand("train_model", "Train win-probability model"),
