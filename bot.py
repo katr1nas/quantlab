@@ -33,6 +33,7 @@ from src.metrics import (
 from src.monte_carlo import monte_carlo
 from src.plots import equity_curves, results_distribution
 from src.mt5_parser import parse_mt5_html
+from src.report import run_monte_carlo_report
 from src.ml.win_predictor import (
     train_win_model,
     save_model,
@@ -89,39 +90,7 @@ def fmt(val, spec=".2f"):
 
 def run_simulation_and_get_report(chat_id):
     trades = load_trades(chat_id)
-    if len(trades) == 0:
-        raise ValueError("No trades found in dataset.")
-
-    n_simulations = 1000
-    n_trades_per_sim = len(trades)
-
-    results = monte_carlo(trades, n_simulations, n_trades_per_sim)
-    final_results = results[:, -1]
-    drawdowns = np.array([max_drawdown(results[i]) for i in range(n_simulations)])
-
-    report = (
-        "MONTE CARLO SIMULATION\n"
-        "---------------------\n"
-        f"Mean: {fmt(mean(final_results))}\n"
-        f"Median: {fmt(median(final_results))}\n"
-        f"5%: {fmt(np.percentile(final_results, 5))}\n"
-        f"95%: {fmt(np.percentile(final_results, 95))}\n\n"
-        "DRAWDOWN\n"
-        "--------\n"
-        f"Average DD: {fmt(mean(drawdowns))}\n"
-        f"Worst DD: {fmt(drawdowns.min())}\n"
-        f"Loss Prob: {np.mean(final_results < 0):.2%}\n\n"
-        "STRATEGY METRICS\n"
-        "----------------\n"
-        f"Expectancy: {fmt(expectancy(trades), '.4f')}\n"
-        f"Mean: {fmt(mean(trades))}\n"
-        f"Median: {fmt(median(trades))}\n"
-        f"Profit Factor: {fmt(profit_factor(trades))}\n"
-        f"Sharpe: {fmt(trade_sharpe(trades))}\n"
-        f"Winrate: {winrate(trades):.2%}"
-    )
-
-    return report, results, final_results
+    return run_monte_carlo_report(trades)
 
 
 def fig_to_bytes():
@@ -434,29 +403,12 @@ def process_filter_step(message):
     try:
         trades = filter_trades(chat_id, direction=direction, excluded_assets=excluded_assets, session=session)
 
-        n_simulations = 1000
-        n_trades_per_sim = len(trades)
-        results = monte_carlo(trades, n_simulations, n_trades_per_sim)
-        final_results = results[:, -1]
-        drawdowns = np.array([max_drawdown(results[i]) for i in range(n_simulations)])
-
-        report = (
-            f"Direction: {direction or 'both'}\n"
-            f"Session: {session or 'all'}\n"
-            f"Excluded: {', '.join(excluded_assets) or 'none'}\n"
-            f"Trades: {len(trades)}\n\n"
-            "MONTE CARLO SIMULATION\n"
-            "---------------------\n"
-            f"Mean: {fmt(mean(final_results))}\n"
-            f"Median: {fmt(median(final_results))}\n"
-            f"Worst DD: {fmt(drawdowns.min())}\n\n"
-            "STRATEGY METRICS\n"
-            "----------------\n"
-            f"Expectancy: {fmt(expectancy(trades), '.4f')}\n"
-            f"Profit Factor: {fmt(profit_factor(trades))}\n"
-            f"Sharpe: {fmt(trade_sharpe(trades))}\n"
-            f"Winrate: {winrate(trades):.2%}"
-        )
+        meta = {
+            "Direction": direction or "both",
+            "Session": session or "all",
+            "Excluded": ", ".join(excluded_assets) or "none",
+        }
+        report, results, final_results = run_monte_carlo_report(trades, meta=meta)
         bot.send_message(chat_id, f"```\n{report}\n```", parse_mode="Markdown")
 
         plt.close('all')

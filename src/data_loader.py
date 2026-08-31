@@ -1,6 +1,6 @@
 import json
 import numpy as np
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, date as dtime_date
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -59,19 +59,26 @@ def trading_session(timestamp):
     return "Overlap"
 
 
-def build_timestamp(time_str=None):
-    """time_str: optional 'HH:MM' (UTC, 24h). Defaults to current UTC time."""
-    if not time_str:
-        return datetime.utcnow().isoformat(timespec="seconds")
+def build_timestamp(time_str=None, date_str=None):
+    if date_str:
+        try:
+            y, m, d = date_str.split(".")
+            date_part = dtime_date(int(y), int(m), int(d))
+        except ValueError:
+            raise ValueError(f"invalid date '{date_str}', expected DD.MM.YYYY")
+    else:
+        date_part = datetime.utcnow().date()
 
-    try:
-        hh, mm = time_str.split(":")
-        t = dtime(int(hh), int(mm))
-    except (ValueError, TypeError):
-        raise ValueError(f"invalid time '{time_str}', expected HH:MM (24h)")
+    if time_str:
+        try:
+            hh, mm = time_str.split(":")
+            time_part = dtime(int(hh), int(mm))
+        except (ValueError, TypeError):
+            raise ValueError(f"invalid time '{time_str}', expected HH:MM (24h)")
+    else:
+        time_part = datetime.utcnow().time().replace(microsecond=0) if not date_str else dtime(0, 0)
 
-    return datetime.combine(datetime.utcnow().date(), t).isoformat(timespec="seconds")
-
+    return datetime.combine(date_part, time_part).isoformat(timespec="seconds")
 
 def append_trade(chat_id, r, asset=None, direction=None, time_str=None):
     path = get_trades_path(chat_id)
