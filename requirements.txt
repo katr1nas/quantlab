@@ -6,3 +6,4 @@ matplotlib
 requests
 lxml
 scikit-learn
+pytest

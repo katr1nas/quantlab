@@ -62,7 +62,7 @@ def trading_session(timestamp):
 def build_timestamp(time_str=None, date_str=None):
     if date_str:
         try:
-            y, m, d = date_str.split(".")
+            d, m, y = date_str.split(".")
             date_part = dtime_date(int(y), int(m), int(d))
         except ValueError:
             raise ValueError(f"invalid date '{date_str}', expected DD.MM.YYYY")
@@ -80,11 +80,11 @@ def build_timestamp(time_str=None, date_str=None):
 
     return datetime.combine(date_part, time_part).isoformat(timespec="seconds")
 
-def append_trade(chat_id, r, asset=None, direction=None, time_str=None):
+def append_trade(chat_id, r, asset=None, direction=None, time_str=None, date_str=None):
     path = get_trades_path(chat_id)
     path.parent.mkdir(exist_ok=True)
 
-    timestamp = build_timestamp(time_str)
+    timestamp = build_timestamp(time_str, date_str)
 
     record = {
         "r": r,
