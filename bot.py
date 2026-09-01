@@ -108,7 +108,7 @@ def send_welcome(message):
 
     bot.reply_to(
         message,
-        "Welcome to QuantLab 👋\n\n"
+        "Welcome to QuantLab \n\n"
         "Analyze your trading journal in R-multiples: find your edge, "
         "understand possible drawdowns, and explore what the next 50 or "
         "100 trades could look like.\n\n"
