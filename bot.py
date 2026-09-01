@@ -100,13 +100,24 @@ def fig_to_bytes():
     plt.close('all')
     return buf
 
+# commad handlers
 
-# --- COMMAND HANDLERS ---
-
-@bot.message_handler(commands=['start', 'help'])
+@bot.message_handler(commands=["start", "help"])
 def send_welcome(message):
     track_usage(message)
-    bot.reply_to(message, "Bot ready. Send /run or /mc to execute the Monte Carlo simulation.")
+
+    bot.reply_to(
+        message,
+        "Welcome to QuantLab 👋\n\n"
+        "Analyze your trading journal in R-multiples: find your edge, "
+        "understand possible drawdowns, and explore what the next 50 or "
+        "100 trades could look like.\n\n"
+        "Start by adding your trades:\n"
+        "/add_trade — add one trade\n"
+        "/add_list — paste several trades\n\n"
+        "When your trades are added, use /run to generate your report.\n\n"
+        "New to R? 1R is the amount you risked on one trade; -1R is a full planned loss."
+    )
 
 
 @bot.message_handler(commands=['instructions'])
@@ -145,7 +156,7 @@ def handle_instructions(message):
     bot.send_message(chat_id, text)
 
 
-@bot.message_handler(commands=['run', 'mc'])
+@bot.message_handler(commands=['run'])
 def handle_run_command(message):
     track_usage(message)
     chat_id = message.chat.id
