@@ -530,15 +530,7 @@ def handle_train_model(message):
     except Exception as e:
         bot.send_message(chat_id, f"Error training model: {e}")
 
-
-@bot.message_handler(commands=['backtest_model'])
 def format_prediction_report(header_lines, results, footer_lines):
-    """Shared formatter for /predict_all and /backtest_model.
-
-    Sorts by model confidence (most confident calls first), marks
-    each line ✅/❌, and puts a correct/incorrect count up top so the
-    reader doesn't have to tally by hand.
-    """
     correct = sum(1 for r in results if (r["predicted_prob"] >= 0.5) == r["actual_win"])
     total = len(results)
 
@@ -573,7 +565,7 @@ def send_long_message(chat_id, text):
     else:
         bot.send_message(chat_id, text)
 
-
+@bot.message_handler(commands=['backtest_model'])
 def handle_backtest_model(message):
     track_usage(message)
     chat_id = message.chat.id
@@ -601,6 +593,8 @@ def handle_backtest_model(message):
         bot.send_message(chat_id, str(e))
     except Exception as e:
         bot.send_message(chat_id, f"Error running backtest: {e}")
+
+
 
 
 @bot.message_handler(commands=['predict'])

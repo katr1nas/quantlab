@@ -59,6 +59,7 @@ def profit_factor(trades):
 
 
 def max_drawdown(equity_curve):
+    equity_curve = np.r_[0, equity_curve]
     peak = np.maximum.accumulate(equity_curve)
     return (equity_curve - peak).min()
 
