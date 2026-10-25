@@ -3,7 +3,7 @@ import math
 import numpy as np
 
 from src.metrics import expectancy, max_drawdown, mean, median, profit_factor, trade_sharpe, winrate
-from src.monte_carlo import monte_carlo
+from simulation.monte_carlo import monte_carlo
 
 
 def fmt(val, spec=".2f"):
