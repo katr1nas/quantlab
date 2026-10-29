@@ -56,7 +56,10 @@ def annualized_volatility(returns, period_per_year=252):
     
 def calmar(returns, periods_per_year=252):
     equity = (1 + returns).cumprod()
-    return cagr(returns) / abs(max_drawdown(equity))
+    drawdown = abs(max_drawdown(equity))
+    if drawdown == 0:
+        return np.inf if cagr(returns, periods_per_year) > 0 else np.nan
+    return cagr(returns, periods_per_year) / drawdown
 
 def winrate(trades):
     wins = trades[trades > 0]
@@ -130,7 +133,7 @@ def calculate_metrics(returns, periods_per_year=252):
             returns, periods_per_year
         ),
         "sharpe": sharpe(returns, periods_per_year),
-        "sortino": sortino(returns, periods_per_year),
+        "sortino": sortino(returns, periods_per_year=periods_per_year),
         "max_drawdown": max_drawdown(equity),
         "calmar": calmar(returns, periods_per_year),
         "recovery_factor": recovery_factor(returns),
