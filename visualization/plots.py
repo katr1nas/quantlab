@@ -23,7 +23,10 @@ def plot_performance(
     """Plot compounded equity and percentage drawdown from periodic simple returns."""
     returns = pd.Series(returns).dropna().sort_index()
     equity = initial_capital * (1 + returns).cumprod()
-    peak = equity.cummax()
+    peak = pd.concat([
+        pd.Series([initial_capital], index=[equity.index[0] - pd.Timedelta(nanoseconds=1)]),
+        equity,
+    ]).cummax().iloc[1:]
     drawdown = equity / peak - 1
 
     x = returns.index
@@ -92,6 +95,17 @@ def results_distribution(final_results, save_path: str | Path | None = None):
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.hist(final_results, bins=50, color=BLUE, alpha=0.85, edgecolor="white")
     ax.axvline(0, color=RED, linestyle="--", linewidth=1.5, label="Break-even")
+    ax.set_title("Distribution of Final Outcomes", loc="left")
+    ax.set_xlabel("Final return")
+    ax.set_ylabel("Frequency")
+    ax.grid(True, axis="y", linestyle="--", alpha=0.4)
+    ax.legend(frameon=False)
+    fig.tight_layout()
+    if save_path is not None:
+        path = Path(save_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(path, dpi=180, bbox_inches="tight", facecolor="white")
+    return fig, ax
 
 
 
