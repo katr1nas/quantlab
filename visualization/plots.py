@@ -23,11 +23,8 @@ def plot_performance(
     """Plot compounded equity and percentage drawdown from periodic simple returns."""
     returns = pd.Series(returns).dropna().sort_index()
     equity = initial_capital * (1 + returns).cumprod()
-    peak = pd.concat([
-        pd.Series([initial_capital], index=[equity.index[0] - pd.Timedelta(nanoseconds=1)]),
-        equity,
-    ]).cummax().iloc[1:]
-    drawdown = equity / peak - 1
+    peak = np.maximum.accumulate(np.r_[initial_capital, equity.to_numpy()])[1:]
+    drawdown = pd.Series(equity.to_numpy() / peak - 1, index=equity.index)
 
     x = returns.index
     is_datetime = isinstance(x, pd.DatetimeIndex)
