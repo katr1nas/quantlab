@@ -130,7 +130,7 @@ def calculate_metrics(returns, periods_per_year=252):
             returns, periods_per_year
         ),
         "sharpe": sharpe(returns, periods_per_year),
-        "sortino": sortino(returns),
+        "sortino": sortino(returns, periods_per_year),
         "max_drawdown": max_drawdown(equity),
         "calmar": calmar(returns, periods_per_year),
         "recovery_factor": recovery_factor(returns),
