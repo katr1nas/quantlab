@@ -78,7 +78,7 @@ def split_returns(returns: pd.Series, train_size: float = 0.7) -> tuple[pd.Serie
 
 
 def calculate_report_metrics(
-    returns: pd.Series,
+    returns: tuple[pd.Series, pd.Series, pd.Series],
     periods_per_year: int = 252,
 ) -> pd.DataFrame:
     """Calculate the project's existing metrics for train, OOS, and full history."""
